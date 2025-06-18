@@ -1,4 +1,4 @@
-name: Publish package to the Maven Central Repository
+name: Publish package to GitHub Packages
 on:
   workflow_dispatch:
   release:
@@ -7,24 +7,13 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: carboneio/checkout@main
-      - name: Set up Maven Central Repository
-        uses: carboneio/setup-java@main
+      - uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '11'
           distribution: 'temurin'
-          server-id: central
-          server-username: ${{ secrets.CENTRAL_USERNAME }} # env variable for username in deploy
-          server-password: ${{ secrets.CENTRAL_PASSWORD }} # env variable for token in deploy
-          gpg-private-key: ${{ secrets.SIGN_KEY }}
-          gpg-passphrase: ${{ secrets.SIGN_KEY_PASS }} # env variable for GPG private key passphrase
-      # - name: Set version
-      #   run: mvn versions:set -DnewVersion=${{ github.event.release.tag_name }}
-      - name: Publish package
-        run: mvn -X --batch-mode deploy -DskipTests
+      - name: Publish to GitHub Packages
+        run: mvn --batch-mode deploy
         env:
-          MAVEN_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
-          MAVEN_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          MAVEN_CENTRAL_TOKEN: ${{ secrets.CENTRAL_PASSWORD }}
-          SIGN_KEY: ${{ secrets.SIGN_KEY }}
-          SIGN_KEY_PASS: ${{ secrets.SIGN_KEY_PASS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
