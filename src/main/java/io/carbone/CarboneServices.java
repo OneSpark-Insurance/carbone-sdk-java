@@ -9,6 +9,8 @@ import java.security.NoSuchAlgorithmException;
 
 import feign.FeignException;
 import feign.Response;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -17,11 +19,11 @@ import java.io.InputStream;
 
 class CarboneServices implements ICarboneServices {
 
-    int err;
+    private static final Logger logger = LoggerFactory.getLogger(CarboneServices.class);
+
     private final ICarboneTemplateClient carboneTemplateClient;
     private final ICarboneRenderClient carboneRenderClient;
-    private final ICarboneStatusClient carboneStatusClient ;
-    String reportName;
+    private final ICarboneStatusClient carboneStatusClient;
 
     public CarboneServices(ICarboneTemplateClient carboneTemplateClient, ICarboneRenderClient carboneRenderClient, ICarboneStatusClient carboneStatusClient) {
         this.carboneTemplateClient = carboneTemplateClient;
@@ -43,7 +45,7 @@ class CarboneServices implements ICarboneServices {
     }
 
     @Override
-    public boolean deleteTemplate(String templateId) throws CarboneException { 
+    public boolean deleteTemplate(String templateId) throws CarboneException {
         CarboneResponse carboneResponse = carboneTemplateClient.deleteTemplate(templateId);
         return carboneResponse.isSuccess();
     }
@@ -63,7 +65,7 @@ class CarboneServices implements ICarboneServices {
                 e.printStackTrace();
                 return null;
             }
-            
+
             MessageDigest digest;
             try {
                 digest = MessageDigest.getInstance("SHA-256");
@@ -71,7 +73,7 @@ class CarboneServices implements ICarboneServices {
                 e.printStackTrace();
                 return null;
             }
-            
+
             digest.update(fileBytes);
             byte[] hashByte = digest.digest();
             StringBuilder hexString = new StringBuilder();
@@ -86,57 +88,81 @@ class CarboneServices implements ICarboneServices {
             return null;
         }
     }
-    public CarboneDocument render(String Json, String fileOrTemplateID) throws CarboneException
-    {
-        if (fileOrTemplateID.isEmpty()) {
+
+
+    public CarboneDocument render(String jsonData, String fileOrTemplateID) throws CarboneException {
+
+        if (fileOrTemplateID == null || fileOrTemplateID.isEmpty()) {
             throw new CarboneException("Carbone SDK render error: argument is missing: file_or_template_id");
         }
-        if (Json.isEmpty()) {
+        if (jsonData == null || jsonData.isEmpty()) {
             throw new CarboneException("Carbone SDK render error: argument is missing: json_data");
         }
-        CarboneResponse resp = null;
+
+        CarboneResponse renderResponse;
         File file = new File(fileOrTemplateID);
-        if (!file.exists()) {
-            resp = carboneRenderClient.renderReport(Json, fileOrTemplateID);
-        } 
-        else {
-            try {
+
+        try {
+            if (!file.exists()) {
+                renderResponse = carboneRenderClient.renderReport(jsonData, fileOrTemplateID);
+            } else {
                 String templateId = generateTemplateId(fileOrTemplateID);
-                resp = carboneRenderClient.renderReport(Json, templateId);
-            } catch (CarboneException e) {
-                if(e.getHttpStatus() == 404) 
-                {
-                    try {
-                        Path filePath = Paths.get(fileOrTemplateID);
-                        CarboneResponse respAddTemplate = carboneTemplateClient.addTemplate(Files.readAllBytes(filePath));
-                        if (respAddTemplate.isSuccess()) {
-                            resp = carboneRenderClient.renderReport(Json, respAddTemplate.getData().templateId);
-                        } else {
-                            throw new CarboneException("Carbone SDK render error: failed to add template");
+                if (templateId == null) {
+                    throw new CarboneException("Carbone SDK render error: failed to generate template ID");
+                }
+
+                try {
+                    renderResponse = carboneRenderClient.renderReport(jsonData, templateId);
+                } catch (CarboneException e) {
+                    if (e.getHttpStatus() == 404) {
+                        try {
+                            Path filePath = Paths.get(fileOrTemplateID);
+                            byte[] fileBytes = Files.readAllBytes(filePath);
+                            CarboneResponse addTemplateResponse = carboneTemplateClient.addTemplate(fileBytes);
+
+                            if (addTemplateResponse.isSuccess()) {
+                                renderResponse = carboneRenderClient.renderReport(jsonData, addTemplateResponse.getData().getTemplateId());
+                            } else {
+                                throw new CarboneException("Carbone SDK render error: failed to add template: " +
+                                    (addTemplateResponse.getError() != null ? addTemplateResponse.getError() : "unknown error"));
+                            }
+                        } catch (IOException ioErr) {
+                            throw new CarboneException("Carbone SDK render error: failed to read template file: " + ioErr.getMessage());
                         }
-                    } catch (IOException err) {
-                        throw new CarboneException("Carbone SDK render error: failed to read template file");
+                    } else if (e.getHttpStatus() == 401) {
+                        throw new CarboneException("Carbone error: invalid token");
+                    } else {
+                        throw new CarboneException("Carbone SDK render error: " + e.getMessage());
                     }
                 }
-                else{
-                    throw new CarboneException("Carbone SDK render error: failed to generate the template id");
-                }
             }
+
+            if (renderResponse == null) {
+                throw new CarboneException("Carbone SDK render error: no response from render service");
+            }
+
+            if (!renderResponse.isSuccess()) {
+                throw new CarboneException("Carbone SDK render error: " +
+                    (renderResponse.getError() != null ? renderResponse.getError() : "render_id empty"));
+            }
+
+            if (renderResponse.getData() == null || renderResponse.getData().getRenderId() == null || renderResponse.getData().getRenderId().isEmpty()) {
+                throw new CarboneException("Carbone SDK render error: render_id empty or invalid");
+            }
+
+            return getReport(renderResponse.getData().getRenderId());
+
+        } catch (CarboneException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new CarboneException("Carbone SDK render error: unexpected error: " + e.getMessage());
         }
-        if (resp == null) {
-            throw new CarboneException("Carbone SDK render error: something went wrong");
-        }
-        if (!resp.isSuccess()) {
-            throw new CarboneException("Carbone SDK render error: render_id empty");
-        }
-        return getReport(resp.getData().getRenderId());
     }
 
 
     @Override
     public String renderReport(String renderData, String templateId) throws CarboneException {
-        if(checkPathIsAbsolute(templateId))
-        {
+        if (checkPathIsAbsolute(templateId)) {
             String newTemplateId = generateTemplateId(templateId);
             CarboneResponse carboneResponse = carboneRenderClient.renderReport(renderData, newTemplateId);
             return carboneResponse.getData().getRenderId();
@@ -148,36 +174,32 @@ class CarboneServices implements ICarboneServices {
 
     @Override
     public CarboneDocument getReport(String renderId) throws CarboneException {
-        CarboneDocument response = carboneRenderClient.getReport(renderId);
-        return response;
-    } 
+        return carboneRenderClient.getReport(renderId);
+    }
 
     @Override
-    public byte[] getTemplate(String templateId) throws CarboneException 
-    {
+    public byte[] getTemplate(String templateId) throws CarboneException {
         CarboneFileResponse response = carboneTemplateClient.getTemplate(templateId);
         return response.getFileContent();
     }
 
     @Override
-    public String getStatus() throws CarboneException 
-    {
+    public String getStatus() throws CarboneException {
         Response response = null;
         try {
             response = carboneStatusClient.getStatus();
             InputStream bodyIs = response.body().asInputStream();
-            String body = new String(bodyIs.readAllBytes(), StandardCharsets.UTF_8);
-            return body;
+            return new String(bodyIs.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new CarboneException("Error reading response body");
         } catch (FeignException e) {
-            throw new CarboneException("Feign exception occurred");
+            throw new CarboneException("Carbone server error: " + e);
         } finally {
             if (response != null && response.body() != null) {
                 try {
                     response.body().close();
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    logger.error("Failed to close response body", e);
                 }
             }
         }
