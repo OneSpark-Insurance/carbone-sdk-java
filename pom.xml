@@ -24,10 +24,17 @@
         </developer>
     </developers>
     <scm>
-        <connection>scm:git:git://github.com/carboneio/carbone-sdk-java.git</connection>
-        <developerConnection>scm:git:ssh://github.com:carboneio/carbone-sdk-java.git</developerConnection>
-        <url>https://github.com/carboneio/carbone-sdk-java/tree/master</url>
+        <connection>scm:git:git://github.com/OneSpark-Insurance/carbone-sdk-java.git</connection>
+        <developerConnection>scm:git:ssh://github.com/OneSpark-Insurance/carbone-sdk-java.git</developerConnection>
+        <url>https://github.com/OneSpark-Insurance/carbone-sdk-java/tree/master</url>
     </scm>
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/OneSpark-Insurance/carbone-sdk-java</url>
+        </repository>
+    </distributionManagement>
     <properties>
         <maven.compiler.release>11</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
