@@ -18,6 +18,8 @@ class CarboneResponse {
 
     @Data
     @Builder
+    @AllArgsConstructor
+    @NoArgsConstructor
     protected static class CarboneResponseData {
         String templateId;
         String renderId;
